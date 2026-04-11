@@ -44,6 +44,38 @@ BEGIN
 END;
 /
 select * from subjects;
+----------------------------------------------performance table
+CREATE TABLE performance (
+  perf_id INT PRIMARY KEY,
+  subj_id INT,
+  ca1 INT,
+  ca2 INT,
+  FOREIGN KEY (subj_id) REFERENCES subjects(subj_id)
+);
+
+CREATE OR REPLACE PROCEDURE populate_performance(
+    perfid IN NUMBER,
+    subid IN NUMBER,
+    s1 IN NUMBER,
+    s2 IN NUMBER
+) IS
+BEGIN
+  INSERT INTO performance VALUES(perfid, subid, s1, s2);
+END;
+/
+
+BEGIN
+    populate_performance(1, 101, 30, 31);
+    populate_performance(2, 102, 39, 40);
+    populate_performance(3, 103, 24, 32);
+    populate_performance(4, 104, 25, 23);
+    populate_performance(5, 105, 27, 20);
+    populate_performance(6, 106, 24, 29);
+    populate_performance(7, 107, 20, 30);
+    populate_performance(8, 108, 25, 16);
+
+    
+END;
 
 ---------------------------------------------study session
 CREATE TABLE study_sessions (
@@ -93,3 +125,43 @@ begin
   return avg_hours;
 end;
 /
+
+----------------------------------------------------avg_score per subject
+create or replace function avg_score_per_subject return number is
+  avg_score number := 0;
+
+BEGIN
+  for i in (select ca1, ca2 from performance) loop
+    avg_score := avg_score + (i.ca1 + i.ca2)/2;
+  end loop;
+  return avg_score;
+  end;
+/
+
+-----------------------------------------------------gap between study sessions
+create or replace function gap_between_sessions return number is
+  avg_gap number := 0;
+  sum := 0;
+BEGIN
+  for i in (select session_date, subject_id from study_sessions order by session_date) loop
+    for j in (select session_date, subject_id from study_sessions order by session_date) loop
+      if i.subject_id == j.subject_id and i.session_date != j.session_date then
+        sum := sum + abs(i.session_date - j.session_date);
+      end if;
+    end loop;   
+  end loop;
+   select sum/(count(*)) into avg_gap from study_sessions;
+  return avg_gap;
+end;
+/
+
+------------------------------------------------------frequency of study sessions per subject
+create or replace function freq_sessions_per_subject return number is
+  freq number := 0;
+BEGIN
+  select count(*) into freq from study_sessions group by subject_id;
+  return freq;
+end;
+/
+
+-------------------------------------------------------
