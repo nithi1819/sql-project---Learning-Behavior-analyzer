@@ -5,9 +5,9 @@ create table students (
   s_name varchar(50)
   );
   
-create or replace procedure populate_stud( sid in NUMBER, name in VARCHAR2) is
+create or replace procedure populate_stud( sid in NUMBER, s_name2 in VARCHAR2) is
 begin
-  insert into students values(sid, name);
+  insert into students values(sid, s_name2);
 end;
 /
 
@@ -76,7 +76,8 @@ BEGIN
 
     
 END;
-
+/
+select * from performance;
 ---------------------------------------------study session
 CREATE TABLE study_sessions (
   session_id int primary key,
@@ -108,6 +109,65 @@ END;
 /
 select * from study_sessions;
 
+-----------------------------------------------------crud
+create or replace procedure add_session(
+  p_session_id in number,
+  p_student_id in number,
+  p_subj_id in number,
+  p_date in date,
+  p_duration in number
+) is
+begin
+  insert into study_sessions
+  values (p_session_id, p_student_id, p_subj_id, p_date, p_duration);
+
+  commit;
+end;
+/
+
+create or replace procedure view_sessions is
+begin
+  for rec in (select * from study_sessions) loop
+    dbms_output.put_line(
+      rec.session_id || ' | ' ||
+      rec.student_id || ' | ' ||
+      rec.subj_id || ' | ' ||
+      rec.session_date || ' | ' ||
+      rec.duration_hours
+    );
+  end loop;
+end;
+/
+
+create or replace procedure update_session(
+  p_session_id in number,
+  p_subj_id in number,
+  p_date in date,
+  p_duration in number
+) is
+begin
+  update study_sessions
+  set subj_id = p_subj_id,
+      session_date = p_date,
+      duration_hours = p_duration
+  where session_id = p_session_id;
+
+  commit;
+end;
+/
+
+create or replace procedure delete_session(
+  p_session_id in number
+) is
+begin
+  delete from study_sessions
+  where session_id = p_session_id;
+
+  commit;
+end;
+/
+
+
 -----------------------------------------------------total time per week
 create or replace function total_time_per_week return number is
   total_hours number := 0;
@@ -118,50 +178,122 @@ end;
 /
 
 ----------------------------------------------------average time per subject
-create or replace function avg_time_per_subject return number is
+create or replace function avg_time_per_subject(p_subj_id in number) return number is
   avg_hours number := 0;
 begin
-    select avg(duration_hours) into avg_hours from study_sessions; 
+    select avg(duration_hours) into avg_hours from study_sessions where subj_id = p_subj_id; 
   return avg_hours;
 end;
 /
 
 ----------------------------------------------------avg_score per subject
-create or replace function avg_score_per_subject return number is
+create or replace function avg_score_per_subject(p_subj_id in number) return number is
   avg_score number := 0;
+  ca1_marks number := 0;
+  ca2_marks number := 0;
 
 BEGIN
-  for i in (select ca1, ca2 from performance) loop
-    avg_score := avg_score + (i.ca1 + i.ca2)/2;
-  end loop;
+  select ca1, ca2  into ca1_marks, ca2_marks from performance where subj_id = p_subj_id; 
+    avg_score := (ca1_marks + ca2_marks)/2;
   return avg_score;
   end;
 /
 
 -----------------------------------------------------gap between study sessions
-create or replace function gap_between_sessions return number is
-  avg_gap number := 0;
-  sum := 0;
+create or replace function gap_between_sessions_per_subject(p_subj_id in number)
+return number IS
+  prev_date date := null;
+  curr_gap number := 0;
+  total_gap number := 0;
+  cnt number := 0;
+
 BEGIN
-  for i in (select session_date, subject_id from study_sessions order by session_date) loop
-    for j in (select session_date, subject_id from study_sessions order by session_date) loop
-      if i.subject_id == j.subject_id and i.session_date != j.session_date then
-        sum := sum + abs(i.session_date - j.session_date);
-      end if;
-    end loop;   
+  for rec in (
+    select session_date
+    from study_sessions
+    where subj_id = p_subj_id
+    order by SESSION_DATE
+  ) LOOP
+  
+    if prev_date is not null THEN
+      curr_gap := rec.session_date - prev_date;
+      total_gap := total_gap + curr_gap;
+      cnt := cnt + 1;
+    end if;
+
+    prev_date := rec.session_date;
   end loop;
-   select sum/(count(*)) into avg_gap from study_sessions;
-  return avg_gap;
+
+  if cnt = 0 THEN
+    return 0;
+  else
+    return total_gap/cnt;
+  end if;
 end;
 /
 
 ------------------------------------------------------frequency of study sessions per subject
-create or replace function freq_sessions_per_subject return number is
+create or replace function freq_sessions_per_subject(p_subj_id in number) return number is
   freq number := 0;
 BEGIN
-  select count(*) into freq from study_sessions group by subject_id;
+  select count(*) into freq from study_sessions where subj_id = p_subj_id;
   return freq;
 end;
 /
 
--------------------------------------------------------
+-----------------------------------------------------main
+create or replace procedure main is
+  total_time number;
+  avg_time_per_sub number;
+  avg_score_per_sub number;
+  avg_gap number;
+  freq_per_sub number;
+  difficulty2 varchar(20);
+
+begin 
+
+  for rec in (select subj_id, DIFFICULTY_LEVEL from subjects)loop
+    total_time := total_time_per_week();
+    avg_time_per_sub := avg_time_per_subject(rec.subj_id);
+    avg_score_per_sub := avg_score_per_subject(rec.subj_id);
+    avg_gap := GAP_BETWEEN_SESSIONS_PER_SUBJECT(rec.subj_id);
+    freq_per_sub := FREQ_SESSIONS_PER_SUBJECT(rec.subj_id);
+    difficulty2 := rec.difficulty_level;
+
+    DBMS_OUTPUT.PUT_LINE('Subject ID: ' || rec.subj_id);
+
+    if avg_gap > 7 then
+        dbms_output.PUT_LINE('Weak retention - revise more frequently (Gap: ' || ROUND(avg_gap, 1) || ' days)');
+    end if;
+
+    if avg_time_per_sub > 6 and avg_score_per_sub < 20 THEN
+        dbms_output.PUT_LINE('Inefficiency - high study time, less marks (Time: ' || ROUND(avg_time_per_sub, 1) || ' hrs | Score: ' || ROUND(avg_score_per_sub, 1) || ')');
+    end if;
+
+    if freq_per_sub < 10 and difficulty2 = 'HARD' then
+        dbms_output.PUT_LINE('You are not studying enough for hard subjects (Current sessions: ' || freq_per_sub || ', Target: 10+)');
+    end if;
+
+    if freq_per_sub < 6 and difficulty2 = 'MEDIUM' then
+        dbms_output.PUT_LINE('You are not studying enough for medium subjects (Current sessions: ' || freq_per_sub || ', Target: 6+)');
+    end if;
+
+    if freq_per_sub < 3 and difficulty2 = 'EASY' then
+        dbms_output.PUT_LINE('You are not studying enough for easy subjects (Current sessions: ' || freq_per_sub || ', Target: 3+)');
+    end if;
+
+    if avg_time_per_sub < 6 and avg_score_per_sub > 25 THEN
+        dbms_output.PUT_LINE('Strong subject - less effort, high score (Time: ' || ROUND(avg_time_per_sub, 1) || ' hrs | Score: ' || ROUND(avg_score_per_sub, 1) || ')');
+    end if;
+  end loop;
+
+
+end;
+/
+
+BEGIN
+  main();
+end;
+/
+
+
